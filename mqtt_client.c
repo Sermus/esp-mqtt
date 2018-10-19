@@ -556,7 +556,11 @@ static void mqtt_enqueue(esp_mqtt_client_handle_t client)
 
 static esp_err_t mqtt_process_receive(esp_mqtt_client_handle_t client)
 {
+    uint8_t *buffer;
+    int32_t bytes_to_parse;
+    uint8_t continue_parsing;
     int read_len;
+    uint32_t parsed_length;
     uint8_t msg_type;
     uint8_t msg_qos;
     uint16_t msg_id;
@@ -572,9 +576,14 @@ static esp_err_t mqtt_process_receive(esp_mqtt_client_handle_t client)
         return ESP_OK;
     }
 
-    msg_type = mqtt_get_type(client->mqtt_state.in_buffer);
-    msg_qos = mqtt_get_qos(client->mqtt_state.in_buffer);
-    msg_id = mqtt_get_id(client->mqtt_state.in_buffer, client->mqtt_state.in_buffer_length);
+    buffer = client->mqtt_state.in_buffer;
+    bytes_to_parse = read_len;
+    while(bytes_to_parse > 0)
+    {
+        msg_type = mqtt_get_type(buffer);
+        msg_qos = mqtt_get_qos(buffer);
+        msg_id = mqtt_get_id(buffer, bytes_to_parse);
+        parsed_length = mqtt_get_total_length(buffer, bytes_to_parse);
 
     ESP_LOGD(TAG, "msg_type=%d, msg_id=%d", msg_type, msg_id);
     switch (msg_type)
@@ -610,11 +619,10 @@ static esp_err_t mqtt_process_receive(esp_mqtt_client_handle_t client)
                     // return ESP_FAIL;
                 }
             }
-            client->mqtt_state.message_length_read = read_len;
-            client->mqtt_state.message_length = mqtt_get_total_length(client->mqtt_state.in_buffer, client->mqtt_state.message_length_read);
+
             ESP_LOGI(TAG, "deliver_publish, message_length_read=%d, message_length=%d", read_len, client->mqtt_state.message_length);
 
-            deliver_publish(client, client->mqtt_state.in_buffer, client->mqtt_state.message_length_read);
+                deliver_publish(client, buffer, parsed_length);
             break;
         case MQTT_MSG_TYPE_PUBACK:
             if (is_valid_mqtt_msg(client, MQTT_MSG_TYPE_PUBLISH, msg_id)) {
@@ -647,6 +655,9 @@ static esp_err_t mqtt_process_receive(esp_mqtt_client_handle_t client)
             ESP_LOGD(TAG, "MQTT_MSG_TYPE_PINGRESP");
             client->wait_for_ping_resp = false;
             break;
+    }
+        buffer += parsed_length;
+        bytes_to_parse -= parsed_length;
     }
 
     return ESP_OK;
